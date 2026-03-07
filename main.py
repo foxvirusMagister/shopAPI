@@ -6,6 +6,7 @@ from typing import Optional, List
 from dotenv import load_dotenv
 from datetime import datetime
 from sqlalchemy.exc import IntegrityError
+from pydantic import ValidationError
 
 
 load_dotenv()
@@ -43,9 +44,38 @@ class TerminalAdd(TerminalBase):
     pass
 
 class TerminalSet(TerminalBase):
-    name: Optional[str]
-    position: Optional[str]
-    place: Optional[str]
+    name: Optional[str] = None
+    position: Optional[str] = None
+    place: Optional[str] = None
+    status: Optional[int] = None
+    total: Optional[float] = None
+    using_from: Optional[datetime] = None
+
+class GoodieBase(SQLModel):
+    id: int
+    name: str
+    price: float
+    amount: int
+    description: Optional[str]
+
+class Goodie(GoodieBase, table=True):
+    __tablename__ = "goodies"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"server_default": text("now()")})
+
+class GoodieGet(GoodieBase):
+    created_at: datetime
+
+class GoodieAdd(GoodieBase):
+    pass
+
+class GoodieSet(GoodieBase):
+    id: Optional[int] = None
+    name: Optional[str] = None
+    price: Optional[float] = None
+    amount: Optional[int] = None
+    description: Optional[str] = None
+
 
 
 @app.get("/terminals", response_model=List[TerminalGet])
@@ -80,7 +110,96 @@ def PutTerminal(id: int, value: TerminalSet):
     with Session(engine) as session:
         data = session.get(Terminal, id)
         if data:
-            pass #Доделать
+            for item in value.model_dump():
+                if eval(f"value.{item}") != None:
+                    exec(f"data.{item} = value.{item}")
+            session.add(data)
+            session.commit()
+            session.refresh(data)
+            return data
+        else:
+            try:
+                data = TerminalAdd(**value.model_dump())
+                data = Terminal(**data.model_dump())
+                session.add(data)
+                session.commit()
+                session.refresh(data)
+                return data
+            except ValidationError:
+                raise HTTPException(detail="Required fields missing", status_code=status.HTTP_406_NOT_ACCEPTABLE)
+            
+@app.delete("/terminals/{id}")
+def DeleteTerminal(id: int):
+    with Session(engine) as session:
+        data = session.get(Terminal, id)
+        if data:
+            session.delete(data)
+            session.commit()
+            return status.HTTP_200_OK
+
+
+@app.get("/goodies", response_model=List[GoodieGet])
+def get_goodies(filter: str | None = None, sort: str | None = None):
+    with Session(engine) as session:
+        possible_filters = ["id", "name", "price", "amount", "description", "created_at"]
+        data = session.exec(FilterAndSort(Goodie, filter, sort, possible_filters)).all()
+        return data
+
+@app.get("/goodies/{id}", response_model=GoodieGet)
+def get_goodie(id: int):
+    with Session(engine) as session:
+        data = session.get(Goodie, id)
+        if data:
+            return data
+        else:
+            HTTPException(detail=f"Product {id} not found!", status_code=status.HTTP_404_NOT_FOUND)
+
+@app.post("/goodies", response_model=GoodieGet)
+def add_goodie(value: GoodieAdd):
+    with Session(engine) as session:
+        try:
+            data = Terminal(**value.model_dump)
+            session.add(data)
+            session.commit()
+            session.refresh(data)
+            return data
+        except IntegrityError as e:
+            raise HTTPException(detail=f"We got an error, maybe some of yours field's values are incorrect. Error: {e}")
+
+@app.put("/goodies/{id}", response_model=GoodieGet)
+def set_goodie(id: int, value: GoodieSet):
+    with Session(engine) as session:
+        data = session.get(Goodie, id)
+        if data:
+            for _key, _value in value.model_dump().items():
+                if _value != None:
+                    setattr(data, _key, _value)
+            session.add(data)
+            session.commit()
+            session.refresh(data)
+            return data
+        else:
+            try:
+                data = GoodieAdd(**value.model_dump())
+                data = Goodie(**data.model_dump())
+                session.add(data)
+                session.commit()
+                session.refresh(data)
+                return data
+            except ValidationError:
+                raise HTTPException(detail="Required fields missing", status_code=status.HTTP_406_NOT_ACCEPTABLE)
+
+@app.delete("/goodies/{id}")
+def delete_goodie(id: int):
+    with Session(engine) as session:
+        data = session.get(Goodie, id)
+        if data:
+            session.delete(data)
+            session.commit()
+            return 200
+        raise HTTPException(detail=f"product {id} not found", status_code=status.HTTP_404_NOT_FOUND)
+
+
         
 
 def FilterAndSort(thing, filter, sort, possible_filters: List[str]):
