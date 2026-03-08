@@ -118,6 +118,7 @@ def GetTerminal(id: int):
         data = session.get(Terminal, id)
         if data:
             return data
+        session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Terminal {id} not found!")
 
 @app.post("/terminals", response_model=TerminalGet)
@@ -131,6 +132,8 @@ def AddTerminal(value: TerminalAdd):
             return data
         except IntegrityError as e:
             raise HTTPException(status_code=status.HTTP_406_NOT_ACCEPTABLE, detail=f"We got an error, maybe some of your values are incorrect. Detail: {e}")
+        finally:
+            session.rollback()
 
 @app.put("/terminals/{id}", response_model=TerminalGet)
 def PutTerminal(id: int, value: TerminalSet):
@@ -154,6 +157,8 @@ def PutTerminal(id: int, value: TerminalSet):
                 return data
             except ValidationError:
                 raise HTTPException(detail="Required fields missing", status_code=status.HTTP_406_NOT_ACCEPTABLE)
+            finally:
+                session.rollback()
             
 @app.delete("/terminals/{id}")
 def DeleteTerminal(id: int):
@@ -162,7 +167,9 @@ def DeleteTerminal(id: int):
         if data:
             session.delete(data)
             session.commit()
-            return status.HTTP_200_OK
+            return id
+        session.rollback()
+        raise HTTPException(detail=f"Terminal with id {id} not found!", status_code=status.HTTP_404_NOT_FOUND)
 
 
 @app.get("/goodies", response_model=List[GoodieGet])
@@ -179,6 +186,7 @@ def get_goodie(id: int):
         if data:
             return data
         else:
+            session.rollback()
             HTTPException(detail=f"Product {id} not found!", status_code=status.HTTP_404_NOT_FOUND)
 
 @app.post("/goodies", response_model=GoodieGet)
@@ -192,6 +200,8 @@ def add_goodie(value: GoodieAdd):
             return data
         except IntegrityError as e:
             raise HTTPException(detail=f"We got an error, maybe some of yours field's values are incorrect. Error: {e}", status_code=status.HTTP_406_NOT_ACCEPTABLE)
+        finally:
+            session.rollback()
 
 @app.put("/goodies/{id}", response_model=GoodieGet)
 def set_goodie(id: int, value: GoodieSet):
@@ -215,6 +225,8 @@ def set_goodie(id: int, value: GoodieSet):
                 return data
             except ValidationError:
                 raise HTTPException(detail="Required fields missing", status_code=status.HTTP_406_NOT_ACCEPTABLE)
+            finally:
+                session.rollback()
 
 @app.delete("/goodies/{id}")
 def delete_goodie(id: int):
@@ -224,6 +236,7 @@ def delete_goodie(id: int):
             session.delete(data)
             session.commit()
             return 200
+        session.rollback()
         raise HTTPException(detail=f"product {id} not found", status_code=status.HTTP_404_NOT_FOUND)
 
 
@@ -240,6 +253,7 @@ def get_selling(id: int):
         data = session.get(Selling, id)
         if data:
             return data
+        session.rollback()
         raise HTTPException(detail=f"Selling with id {id} was not found", status_code=status.HTTP_404_NOT_FOUND)
     
 @app.post("/sellings", response_model=SellingGet)
@@ -255,6 +269,8 @@ def add_selling(new: SellingAdd):
             raise HTTPException(detail=f"We got an error, maybe some of yours field's values are incorect! Error code: {e}", status_code=status.HTTP_406_NOT_ACCEPTABLE)
         except InternalError as e:
             raise HTTPException(detail=f"Price value is incorect: {e.orig}", status_code=status.HTTP_406_NOT_ACCEPTABLE)
+        finally:
+            session.rollback()
     
 @app.delete("/sellings/{id}")
 def delete_selling(id: int):
@@ -263,6 +279,7 @@ def delete_selling(id: int):
         if data:
             session.delete(data)
             return id
+        session.rollback()
         raise HTTPException(detail=f"Selling with {id} was not found!", status_code=status.HTTP_404_NOT_FOUND)
 
 def FilterAndSort(thing, filter, sort, possible_filters: List[str]):
