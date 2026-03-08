@@ -5,7 +5,8 @@ from sqlmodel import SQLModel, Field, create_engine, Session, select, text
 from typing import Optional, List
 from dotenv import load_dotenv
 from datetime import datetime
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, InternalError
+from psycopg2.errors import RaiseException
 from pydantic import ValidationError
 
 
@@ -75,6 +76,32 @@ class GoodieSet(GoodieBase):
     price: Optional[float] = None
     amount: Optional[int] = None
     description: Optional[str] = None
+
+
+class SellingBase(SQLModel):
+    goodie_id: int
+    terminal_id: int
+    amount: int = Field(default=1, nullable=False)
+    discount: Optional[float] = Field(default=0)
+    selling_code: str
+
+class Selling(SellingBase, table=True):
+    __tablename__ = "sellings"
+    id: int = Field(default=None, primary_key=True)
+    total_price: Optional[float] = Field(default=None)
+    created_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"server_default": text("now()")})
+
+
+class SellingGet(SellingBase):
+    id: int
+    total_price: float
+    created_at: datetime
+
+class SellingAdd(SellingBase):
+    pass
+
+
+
 
 
 
@@ -164,7 +191,7 @@ def add_goodie(value: GoodieAdd):
             session.refresh(data)
             return data
         except IntegrityError as e:
-            raise HTTPException(detail=f"We got an error, maybe some of yours field's values are incorrect. Error: {e}")
+            raise HTTPException(detail=f"We got an error, maybe some of yours field's values are incorrect. Error: {e}", status_code=status.HTTP_406_NOT_ACCEPTABLE)
 
 @app.put("/goodies/{id}", response_model=GoodieGet)
 def set_goodie(id: int, value: GoodieSet):
@@ -200,7 +227,43 @@ def delete_goodie(id: int):
         raise HTTPException(detail=f"product {id} not found", status_code=status.HTTP_404_NOT_FOUND)
 
 
-        
+@app.get("/sellings", response_model=List[SellingGet])
+def get_sellings(sort: str | None = None, filter: str | None = None):
+    with Session(engine) as session:
+        possible_filters: str = ["id", "goodie_id", "terminal_id", "amount", "total_price", "discount", "created_at", "selling_code"]
+        data = session.exec(FilterAndSort(Selling, filter, sort, possible_filters)).all()
+        return data
+
+@app.get("/sellings/{id}", response_model=SellingGet)
+def get_selling(id: int):
+    with Session(engine) as session:
+        data = session.get(Selling, id)
+        if data:
+            return data
+        raise HTTPException(detail=f"Selling with id {id} was not found", status_code=status.HTTP_404_NOT_FOUND)
+    
+@app.post("/sellings", response_model=SellingGet)
+def add_selling(new: SellingAdd):
+    with Session(engine) as session:
+        try:
+            data = Selling(**new.model_dump())
+            session.add(data)
+            session.commit()
+            session.refresh(data)
+            return data
+        except IntegrityError as e:
+            raise HTTPException(detail=f"We got an error, maybe some of yours field's values are incorect! Error code: {e}", status_code=status.HTTP_406_NOT_ACCEPTABLE)
+        except InternalError as e:
+            raise HTTPException(detail=f"Price value is incorect: {e.orig}", status_code=status.HTTP_406_NOT_ACCEPTABLE)
+    
+@app.delete("/sellings/{id}")
+def delete_selling(id: int):
+    with Session(engine) as session:
+        data = session.get(Selling, id)
+        if data:
+            session.delete(data)
+            return id
+        raise HTTPException(detail=f"Selling with {id} was not found!", status_code=status.HTTP_404_NOT_FOUND)
 
 def FilterAndSort(thing, filter, sort, possible_filters: List[str]):
     sign = "asc"
