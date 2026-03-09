@@ -53,11 +53,10 @@ class TerminalSet(TerminalBase):
     using_from: Optional[datetime] = None
 
 class GoodieBase(SQLModel):
-    id: int
     name: str
     price: float
     amount: int
-    description: Optional[str]
+    description: Optional[str] = None
 
 class Goodie(GoodieBase, table=True):
     __tablename__ = "goodies"
@@ -65,6 +64,7 @@ class Goodie(GoodieBase, table=True):
     created_at: Optional[datetime] = Field(default=None, sa_column_kwargs={"server_default": text("now()")})
 
 class GoodieGet(GoodieBase):
+    id: int
     created_at: datetime
 
 class GoodieAdd(GoodieBase):
@@ -101,8 +101,21 @@ class SellingAdd(SellingBase):
     pass
 
 
+class StatusBase(SQLModel):
+    name: str
 
+class Status(StatusBase, table=True):
+    __tablename__ = "statuses"
+    id: int = Field(default=None, primary_key=True)
 
+class StatusGet(StatusBase):
+    id: int
+
+class StatusAdd(StatusBase):
+    pass
+
+class StatusSet(StatusBase):
+    name: Optional[str] = None
 
 
 @app.get("/terminals", response_model=List[TerminalGet])
@@ -118,7 +131,6 @@ def GetTerminal(id: int):
         data = session.get(Terminal, id)
         if data:
             return data
-        session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Terminal {id} not found!")
 
 @app.post("/terminals", response_model=TerminalGet)
@@ -132,8 +144,7 @@ def AddTerminal(value: TerminalAdd):
             return data
         except IntegrityError as e:
             raise HTTPException(status_code=status.HTTP_406_NOT_ACCEPTABLE, detail=f"We got an error, maybe some of your values are incorrect. Detail: {e}")
-        finally:
-            session.rollback()
+        session.rollback()
 
 @app.put("/terminals/{id}", response_model=TerminalGet)
 def PutTerminal(id: int, value: TerminalSet):
@@ -157,8 +168,7 @@ def PutTerminal(id: int, value: TerminalSet):
                 return data
             except ValidationError:
                 raise HTTPException(detail="Required fields missing", status_code=status.HTTP_406_NOT_ACCEPTABLE)
-            finally:
-                session.rollback()
+            session.rollback()
             
 @app.delete("/terminals/{id}")
 def DeleteTerminal(id: int):
@@ -186,22 +196,20 @@ def get_goodie(id: int):
         if data:
             return data
         else:
-            session.rollback()
             HTTPException(detail=f"Product {id} not found!", status_code=status.HTTP_404_NOT_FOUND)
 
 @app.post("/goodies", response_model=GoodieGet)
 def add_goodie(value: GoodieAdd):
     with Session(engine) as session:
         try:
-            data = Terminal(**value.model_dump)
+            data = Goodie(**value.model_dump())
             session.add(data)
             session.commit()
             session.refresh(data)
             return data
         except IntegrityError as e:
             raise HTTPException(detail=f"We got an error, maybe some of yours field's values are incorrect. Error: {e}", status_code=status.HTTP_406_NOT_ACCEPTABLE)
-        finally:
-            session.rollback()
+        session.rollback()
 
 @app.put("/goodies/{id}", response_model=GoodieGet)
 def set_goodie(id: int, value: GoodieSet):
@@ -225,8 +233,7 @@ def set_goodie(id: int, value: GoodieSet):
                 return data
             except ValidationError:
                 raise HTTPException(detail="Required fields missing", status_code=status.HTTP_406_NOT_ACCEPTABLE)
-            finally:
-                session.rollback()
+            session.rollback()
 
 @app.delete("/goodies/{id}")
 def delete_goodie(id: int):
@@ -253,7 +260,6 @@ def get_selling(id: int):
         data = session.get(Selling, id)
         if data:
             return data
-        session.rollback()
         raise HTTPException(detail=f"Selling with id {id} was not found", status_code=status.HTTP_404_NOT_FOUND)
     
 @app.post("/sellings", response_model=SellingGet)
@@ -269,8 +275,7 @@ def add_selling(new: SellingAdd):
             raise HTTPException(detail=f"We got an error, maybe some of yours field's values are incorect! Error code: {e}", status_code=status.HTTP_406_NOT_ACCEPTABLE)
         except InternalError as e:
             raise HTTPException(detail=f"Price value is incorect: {e.orig}", status_code=status.HTTP_406_NOT_ACCEPTABLE)
-        finally:
-            session.rollback()
+        session.rollback()
     
 @app.delete("/sellings/{id}")
 def delete_selling(id: int):
@@ -281,6 +286,71 @@ def delete_selling(id: int):
             return id
         session.rollback()
         raise HTTPException(detail=f"Selling with {id} was not found!", status_code=status.HTTP_404_NOT_FOUND)
+
+
+@app.get("/statuses", response_model=List[StatusGet])
+def get_statuses(sort: str | None = None, filter: str | None = None):
+    with Session(engine) as session:
+        possible_filters: List[str] = ["id", "name"]
+        data = session.exec(FilterAndSort(Status, filter, sort, possible_filters)).all()
+        return data
+
+@app.get("/statuses/{id}", response_model=StatusGet)
+def get_status(id: int):
+    with Session(engine) as session:
+        data = session.get(Status, id)
+        if data:
+            return data
+        else:
+            raise HTTPException(detail=f"Status with id {id} was not found!", status_code=status.HTTP_404_NOT_FOUND)
+
+@app.post("/statuses", response_model=StatusGet)
+def add_status(new: StatusAdd):
+    with Session(engine) as session:
+        try:
+            data = Status(**new.model_dump())
+            session.add(data)
+            session.commit()
+            session.refresh(data)
+            return data
+        except IntegrityError:
+            raise HTTPException(detail="We got an error, maybe some of yours field's values are incorect! Error code: {e}", status_code=status.HTTP_406_NOT_ACCEPTABLE)
+        session.rollback()
+
+@app.put("/statuses/{id}", response_model=StatusGet)
+def set_status(id: int, new: StatusSet):
+    with Session(engine) as session:
+        data = session.get(Status, id)
+        if data:
+            for _key, _value in new.model_dump().items():
+                setattr(data, _key, _value)
+            session.add(data)
+            session.commit()
+            session.refresh(data)
+            return data
+        else:
+            try:
+                data = Status(**new.model_dump())
+                session.add(data)
+                session.commit()
+                session.refresh(data)
+                return data
+            except ValidationError:
+                raise HTTPException(detail="Required fields missing", status_code=status.HTTP_406_NOT_ACCEPTABLE)
+            session.rollback()
+
+@app.delete("/statuses/{id}")
+def delete_status(id: int):
+    with Session(engine) as session:
+        data = session.get(Status, id)
+        if data:
+            session.delete(data)
+            session.commit()
+            return id
+        else:
+            session.rollback()
+            raise HTTPException(detail=f"Status with id {id} was not found!", status_code=status.HTTP_404_NOT_FOUND)
+
 
 def FilterAndSort(thing, filter, sort, possible_filters: List[str]):
     sign = "asc"
